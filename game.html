@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AISYLE · Minesweeper</title>
+<meta name="description" content="Play minesweeper in the browser.">
+<meta property="og:title" content="AISYLE - Minesweeper">
+<meta property="og:description" content="Play minesweeper in the browser.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://aisyle5.github.io/game.html">
+<meta property="og:image" content="https://aisyle5.github.io/assets/bg.webp">
+<meta name="theme-color" content="#000000">
+<style>
+  /* === Reset === */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* === Base === */
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: #fff url("assets/bg.webp") center / cover fixed;
+    color: #fff;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(0,0,0, 0.35) 0%, rgba(0,0,0, 0.1) 40%, transparent 65%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* === Button === */
+  .btn {
+    display: inline-block;
+    padding: 0.6rem 1.5rem;
+    border: 1px solid rgba(255,255,255, 0.3);
+    border-radius: 100px;
+    color: rgba(255,255,255, 0.85);
+    text-decoration: none;
+    font-size: 0.9rem;
+    transition: background 0.3s, border-color 0.3s;
+    background: none;
+    cursor: pointer;
+  }
+  .btn:hover {
+    background: rgba(255,255,255, 0.1);
+    border-color: rgba(255,255,255, 0.5);
+  }
+
+  .content { position: relative; z-index: 1; text-align: center; }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2rem;
+    margin-bottom: 1rem;
+  }
+  .stat {
+    font-size: 1.2rem;
+    font-weight: 300;
+    letter-spacing: 0.1em;
+    color: rgba(255,255,255, 0.8);
+  }
+
+  .grid {
+    display: inline-grid;
+    grid-template-columns: repeat(9, calc((80vmin - 8px) / 9));
+    gap: 1px;
+    background: rgba(255,255,255, 0.15);
+    border: 1px solid rgba(255,255,255, 0.2);
+    border-radius: 4px;
+    overflow: hidden;
+    user-select: none;
+    margin-bottom: 1.5rem;
+  }
+  .cell {
+    width: calc((80vmin - 8px) / 9);
+    height: calc((80vmin - 8px) / 9);
+    background: rgba(255,255,255, 0.6);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: calc(80vmin / 16);
+    font-weight: 500;
+    transition: background 0.1s;
+  }
+  .cell:hover { background: rgba(255,255,255, 0.75); }
+  .cell.revealed {
+    background: rgba(255,255,255, 0.04);
+    cursor: default;
+  }
+  .cell.revealed:hover { background: rgba(255,255,255, 0.04); }
+  .cell.mine { background: rgba(255,80,80, 0.4); }
+  .cell.flag { color: #f44; }
+  .n1 { color: #4fc3f7; }
+  .n2 { color: #81c784; }
+  .n3 { color: #ef5350; }
+  .n4 { color: #7e57c2; }
+  .n5 { color: #ff7043; }
+  .n6 { color: #26c6da; }
+  .n7 { color: #fff; }
+  .n8 { color: rgba(255,255,255, 0.5); }
+
+  .result {
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    color: rgba(255,255,255, 0.8);
+  }
+</style>
+</head>
+<body>
+<div class="content">
+  <div class="bar">
+    <span class="stat">💣 <span id="mineCount">10</span></span>
+    <span class="stat">⏱ <span id="timer">0</span></span>
+  </div>
+  <p class="result" id="result"></p>
+  <div class="grid" id="grid"></div>
+  <div style="display:flex;align-items:center;justify-content:center;gap:1rem;">
+    <button class="btn" id="restart" style="margin:0;">New Game</button>
+    <button class="btn" id="fullscreenBtn" style="margin:0;">Fullscreen</button>
+    <a class="btn" href="index.html" style="margin:0;">← Back</a>
+  </div>
+</div>
+
+<script>
+const ROWS = 9, COLS = 9, MINES = 10;
+let board = [], revealed = [], flagged = [], gameOver = false, flagCount = 0;
+let startTime = null, timerId = null;
+
+const grid = document.getElementById('grid');
+const mineCountEl = document.getElementById('mineCount');
+const timerEl = document.getElementById('timer');
+const resultEl = document.getElementById('result');
+
+function createCells() {
+  grid.innerHTML = '';
+  for (let i = 0; i < ROWS * COLS; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.dataset.index = i;
+    grid.appendChild(cell);
+  }
+}
+
+function render() {
+  const cells = grid.children;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cell = cells[r * COLS + c];
+      cell.className = 'cell';
+      cell.textContent = '';
+      if (revealed[r][c]) {
+        cell.classList.add('revealed');
+        if (board[r][c] === -1) { cell.classList.add('mine'); cell.textContent = '💣'; }
+        else if (board[r][c] > 0) { cell.textContent = board[r][c]; cell.classList.add('n' + board[r][c]); }
+      } else if (flagged[r][c]) {
+        cell.classList.add('flag');
+        cell.textContent = '🚩';
+      }
+    }
+  }
+}
+
+// Event delegation — one listener on the grid
+grid.addEventListener('click', function(e) {
+  const cell = e.target.closest('.cell');
+  if (!cell) return;
+  const i = +cell.dataset.index;
+  clickCell(Math.floor(i / COLS), i % COLS);
+});
+
+grid.addEventListener('contextmenu', function(e) {
+  e.preventDefault();
+  const cell = e.target.closest('.cell');
+  if (!cell) return;
+  const i = +cell.dataset.index;
+  rightClick(Math.floor(i / COLS), i % COLS);
+});
+
+function startTimer() {
+  if (startTime || gameOver) return;
+  startTime = Date.now();
+  timerId = setInterval(function() { timerEl.textContent = Math.floor((Date.now() - startTime) / 1000); }, 1000);
+}
+
+function clickCell(r, c) {
+  if (gameOver || revealed[r][c] || flagged[r][c]) return;
+  startTimer();
+  if (board[r][c] === -1) { lose(); return; }
+  reveal(r, c);
+  if (checkWin()) { win(); return; }
+  render();
+}
+
+function reveal(r, c) {
+  if (r < 0 || r >= ROWS || c < 0 || c >= COLS || revealed[r][c] || flagged[r][c]) return;
+  revealed[r][c] = true;
+  if (board[r][c] === 0) {
+    for (let dr = -1; dr <= 1; dr++)
+      for (let dc = -1; dc <= 1; dc++)
+        if (dr !== 0 || dc !== 0) reveal(r + dr, c + dc);
+  }
+}
+
+function rightClick(r, c) {
+  if (gameOver || revealed[r][c]) return;
+  startTimer();
+  flagged[r][c] = !flagged[r][c];
+  flagCount += flagged[r][c] ? 1 : -1;
+  mineCountEl.textContent = MINES - flagCount;
+  render();
+}
+
+function lose() {
+  gameOver = true;
+  if (timerId) { clearInterval(timerId); timerId = null; }
+  for (let i = 0; i < ROWS; i++)
+    for (let j = 0; j < COLS; j++)
+      if (board[i][j] === -1) revealed[i][j] = true;
+  render();
+  resultEl.textContent = 'You lose!';
+}
+
+function checkWin() {
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (!revealed[r][c] && board[r][c] !== -1) return false;
+  return true;
+}
+
+function win() {
+  gameOver = true;
+  if (timerId) { clearInterval(timerId); timerId = null; }
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (board[r][c] === -1) flagged[r][c] = true;
+  flagCount = MINES;
+  mineCountEl.textContent = 0;
+  render();
+  resultEl.textContent = 'You win!';
+}
+
+function init() {
+  board = Array(ROWS).fill().map(() => Array(COLS).fill(0));
+  revealed = Array(ROWS).fill().map(() => Array(COLS).fill(false));
+  flagged = Array(ROWS).fill().map(() => Array(COLS).fill(false));
+  gameOver = false; startTime = null; flagCount = 0;
+  if (timerId) { clearInterval(timerId); timerId = null; }
+  timerEl.textContent = '0';
+  resultEl.textContent = '';
+
+  let placed = 0;
+  while (placed < MINES) {
+    const r = Math.floor(Math.random() * ROWS);
+    const c = Math.floor(Math.random() * COLS);
+    if (board[r][c] !== -1) { board[r][c] = -1; placed++; }
+  }
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++) {
+      if (board[r][c] === -1) continue;
+      let count = 0;
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          const nr = r + dr, nc = c + dc;
+          if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && board[nr][nc] === -1) count++;
+        }
+      board[r][c] = count;
+    }
+  mineCountEl.textContent = MINES;
+  render();
+}
+
+document.getElementById('restart').addEventListener('click', init);
+document.getElementById('fullscreenBtn').addEventListener('click', function() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen();
+});
+
+createCells();
+init();
+</script>
+</body>
+</html>
